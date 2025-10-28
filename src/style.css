@@ -1,0 +1,25 @@
+/* Minimal reset and full-screen canvas styles for Vektor */
+*, *::before, *::after {
+  box-sizing: border-box;
+}
+html, body {
+  height: 100%;
+  margin: 0;
+  padding: 0;
+  background: #1a1a1a; /* match PIXI backgroundColor */
+  color: #e6e6e6;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+/* Ensure canvas occupies the full viewport */
+canvas, #app > canvas, body > canvas {
+  display: block;
+  width: 100vw;
+  height: 100vh;
+}
+
+/* Utility: make the root app div take full screen if used */
+#app {
+  position: fixed;
+  inset: 0;
+}
