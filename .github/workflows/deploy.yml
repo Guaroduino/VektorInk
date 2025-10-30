@@ -2,7 +2,7 @@ name: Deploy to GitHub Pages
 
 on:
   push:
-    branches: [ main ]
+    branches: [ main, master ]
   workflow_dispatch:
 
 permissions:
@@ -30,8 +30,12 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
+      - name: Compute base path
+        shell: bash
+        run: echo "VITE_BASE=/${GITHUB_REPOSITORY#*/}/" >> $GITHUB_ENV
+
       - name: Build site
-        run: npm run build -- --base=/VektorInk/
+        run: npm run build -- --base=$VITE_BASE
 
       - name: Upload artifact
         uses: actions/upload-pages-artifact@v3
