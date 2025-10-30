@@ -302,6 +302,7 @@ export class FreehandTool extends EventEmitter implements ITool {
       const point = (strokePoints[i] as any).point as [number, number];
       const t = tangents[i];
       const r = Math.max(0.01, widths[i] || (this.strokeSettings.size ?? 1) * 0.5);
+      // Direction: for start cap, normal points backward; for end cap, forward
       const midAngle = Math.atan2(atStart ? -t[1] : t[1], atStart ? -t[0] : t[0]);
       const startAngle = midAngle - Math.PI * 0.5;
       const endAngle = midAngle + Math.PI * 0.5;
@@ -312,11 +313,7 @@ export class FreehandTool extends EventEmitter implements ITool {
       const arcIndices: number[] = [];
 
       // choose direction: start cap from left->right, end cap from right->left
-      if (atStart) {
-        arcIndices.push(leftIdx);
-      } else {
-        arcIndices.push(rightIdx);
-      }
+      arcIndices.push(atStart ? leftIdx : rightIdx);
 
       // intermediate arc points
       for (let s = 1; s < steps; s++) {
@@ -324,20 +321,15 @@ export class FreehandTool extends EventEmitter implements ITool {
         const ax = point[0] + Math.cos(a) * r;
         const ay = point[1] + Math.sin(a) * r;
         vertices.push(ax, ay);
-        arcIndices.push(index + (atStart ? 0 : 0));
-        // newly added vertex index is current vertex count/2 - 1
-        arcIndices[arcIndices.length - 1] = (vertices.length / 2) - 1;
+        const vidx = (vertices.length / 2) - 1;
+        arcIndices.push(vidx);
       }
 
-      if (atStart) {
-        arcIndices.push(rightIdx);
-      } else {
-        arcIndices.push(leftIdx);
-      }
+      arcIndices.push(atStart ? rightIdx : leftIdx);
 
       // center vertex
-      const centerIndex = vertices.length / 2;
       vertices.push(point[0], point[1]);
+      const centerIndex = (vertices.length / 2) - 1;
 
       // triangles fan
       for (let k = 0; k < arcIndices.length - 1; k++) {

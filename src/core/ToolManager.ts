@@ -162,4 +162,19 @@ export class ToolManager {
       this.activeTool.onRenderPreview(this.previewLayer);
     }
   }
+
+  public clearScene(): void {
+    if (!this.scene) return;
+    const removed = this.scene.removeChildren();
+    for (const obj of removed) {
+      // Destroy any GPU resources held by the object/children
+      try {
+        (obj as any).destroy?.({ children: true });
+      } catch {
+        // ignore
+      }
+    }
+    // Clear any preview graphics too
+    this.previewLayer?.clear();
+  }
 }

@@ -53,6 +53,10 @@ export class CanvasManager {
         this.toolManager.setActiveTool(toolName);
       });
 
+    // Clear Canvas button
+    const actions = { clear: () => this.toolManager.clearScene() };
+    toolFolder.add(actions, 'clear').name('Clear Canvas');
+
     // 1. Inicializa el ToolManager, pasándole las dependencias
     this.toolManager = new ToolManager(
       this.app,
