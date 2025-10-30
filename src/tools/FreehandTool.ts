@@ -1,16 +1,17 @@
 import EventEmitter from 'eventemitter3';
-import { Application, Container, Graphics, Point } from 'pixi.js';
-import { getStroke } from 'perfect-freehand';
+import { Application, Container, Graphics, Point, MeshSimple, Texture } from 'pixi.js';
+import { getStrokePoints } from 'perfect-freehand';
 import { GUI } from 'lil-gui';
 import type { ITool, VektorPointerEvent } from './ITool';
 import { VektorObject } from '../core/VektorObject';
 import type { StrokePoint } from '../types';
+// Tess2 no longer used with mesh ribbon approach
 
 export class FreehandTool extends EventEmitter implements ITool {
   private app: Application;
 
   private isDrawing: boolean = false;
-  private activeStroke: Graphics | null = null;
+  private activeStroke: MeshSimple | null = null;
   private activePointerId: number | null = null;
   private strokes: Graphics[] = [];
   private debugPolylineLayer: Graphics;
@@ -43,28 +44,53 @@ export class FreehandTool extends EventEmitter implements ITool {
 
     // GUI wiring (copied from CanvasManager)
     const strokeFolder = this.gui.addFolder('Stroke Settings');
-    strokeFolder.addColor(this.strokeSettings, 'strokeColor').name('Color');
-    strokeFolder.add(this.strokeSettings, 'size', 1, 64).name('Size');
-    strokeFolder.add(this.strokeSettings, 'thinning', -1, 1).name('Thinning');
+    strokeFolder.addColor(this.strokeSettings, 'strokeColor').name('Color').onChange(() => {
+      if (this.isDrawing) {
+        // Simplemente redibuja el mesh; el nuevo tinte se aplicará en updateStrokeMesh
+        this.updateStrokeMesh(false);
+      }
+    });
+    strokeFolder.add(this.strokeSettings, 'size', 1, 64).name('Size').onChange(() => {
+      if (this.isDrawing) this.updateStrokeMesh(false);
+    });
+    strokeFolder.add(this.strokeSettings, 'thinning', -1, 1).name('Thinning').onChange(() => {
+      if (this.isDrawing) this.updateStrokeMesh(false);
+    });
 
     const smoothingFolder = this.gui.addFolder('Smoothing');
-    smoothingFolder.add(this.strokeSettings, 'smoothing', 0, 1).name('Smoothing');
-    smoothingFolder.add(this.strokeSettings, 'streamline', 0, 1).name('Streamline');
+    smoothingFolder.add(this.strokeSettings, 'smoothing', 0, 1).name('Smoothing').onChange(() => {
+      if (this.isDrawing) this.updateStrokeMesh(false);
+    });
+    smoothingFolder.add(this.strokeSettings, 'streamline', 0, 1).name('Streamline').onChange(() => {
+      if (this.isDrawing) this.updateStrokeMesh(false);
+    });
     smoothingFolder.add(this.strokeSettings, 'easingPreset', {
       Linear: 'linear',
       EaseIn: 'easeIn',
       EaseOut: 'easeOut',
       EaseInOut: 'easeInOut',
-    }).name('Easing');
+    }).name('Easing').onChange(() => {
+      if (this.isDrawing) this.updateStrokeMesh(false);
+    });
 
     const taperFolder = this.gui.addFolder('Taper');
-    taperFolder.add(this.strokeSettings, 'taperStart', 0, 64).name('Taper Start');
-    taperFolder.add(this.strokeSettings, 'taperEnd', 0, 64).name('Taper End');
-    taperFolder.add(this.strokeSettings, 'capStart').name('Cap Start');
-    taperFolder.add(this.strokeSettings, 'capEnd').name('Cap End');
+    taperFolder.add(this.strokeSettings, 'taperStart', 0, 64).name('Taper Start').onChange(() => {
+      if (this.isDrawing) this.updateStrokeMesh(false);
+    });
+    taperFolder.add(this.strokeSettings, 'taperEnd', 0, 64).name('Taper End').onChange(() => {
+      if (this.isDrawing) this.updateStrokeMesh(false);
+    });
+    taperFolder.add(this.strokeSettings, 'capStart').name('Cap Start').onChange(() => {
+      if (this.isDrawing) this.updateStrokeMesh(false);
+    });
+    taperFolder.add(this.strokeSettings, 'capEnd').name('Cap End').onChange(() => {
+      if (this.isDrawing) this.updateStrokeMesh(false);
+    });
 
     const debugFolder = this.gui.addFolder('Debug');
-    debugFolder.add(this.strokeSettings, 'simulatePressure').name('Simulate Pressure');
+    debugFolder.add(this.strokeSettings, 'simulatePressure').name('Simulate Pressure').onChange(() => {
+      if (this.isDrawing) this.updateStrokeMesh(false);
+    });
     debugFolder
       .add(this.strokeSettings, 'showPolyline')
       .name('Show Polyline')
@@ -90,10 +116,19 @@ export class FreehandTool extends EventEmitter implements ITool {
     // Añadir todos los puntos iniciales (normalmente uno)
     this.points.push(...event.points);
 
-    this.activeStroke = new Graphics();
+    // Use a shared 1x1 white texture with mesh tint for color
+    if (!(window as any).__VEKTOR_WHITE_TEXTURE__) {
+      const c = document.createElement('canvas');
+      c.width = 1; c.height = 1;
+      const ctx = c.getContext('2d');
+      if (ctx) { ctx.fillStyle = '#ffffff'; ctx.fillRect(0, 0, 1, 1); }
+      (window as any).__VEKTOR_WHITE_TEXTURE__ = Texture.from(c);
+    }
+
+    this.activeStroke = new MeshSimple({ texture: (window as any).__VEKTOR_WHITE_TEXTURE__ });
     targetLayer.addChild(this.activeStroke);
 
-    this.updateStrokeGraphics(false);
+    this.updateStrokeMesh(false);
     this.updateDebugPolyline();
   }
 
@@ -103,7 +138,7 @@ export class FreehandTool extends EventEmitter implements ITool {
     // Añadir todos los puntos fusionados recibidos
     this.points.push(...event.points);
 
-    this.updateStrokeGraphics(false);
+    this.updateStrokeMesh(false);
     this.updateDebugPolyline();
   }
 
@@ -113,7 +148,7 @@ export class FreehandTool extends EventEmitter implements ITool {
     // Añadir los puntos finales fusionados
     this.points.push(...event.points);
 
-    this.updateStrokeGraphics(true);
+  this.updateStrokeMesh(true);
     this.updateDebugPolyline();
 
     if (this.activeStroke && this.points.length > 0) {
@@ -125,7 +160,7 @@ export class FreehandTool extends EventEmitter implements ITool {
       this.emit('strokeComplete', finalObject);
     }
 
-    this.activeStroke = null;
+  this.activeStroke = null;
     this.points = [];
     this.isDrawing = false;
     this.activePointerId = null;
@@ -154,10 +189,13 @@ export class FreehandTool extends EventEmitter implements ITool {
     }
   }
 
-  // Migrated helpers
-  private updateStrokeGraphics(isComplete: boolean): void {
-    if (!this.activeStroke || this.points.length < 2) return;
+  /**
+   * Recalcula y dibuja el trazo activo usando un MeshSimple y los puntos de perfect-freehand.
+   */
+  private updateStrokeMesh(isComplete: boolean): void {
+    if (!this.activeStroke || this.points.length === 0) return;
 
+    // 1. Opciones para perfect-freehand (Igual que antes)
     const easingFn = (() => {
       switch (this.strokeSettings.easingPreset) {
         case 'easeIn': return (t: number) => t * t;
@@ -187,22 +225,87 @@ export class FreehandTool extends EventEmitter implements ITool {
       last: isComplete,
     } as const;
 
-    const outline = getStroke(this.points as any, strokeOptions as any);
-    if (outline.length < 3) {
-      this.activeStroke.clear();
+    // 2. Usar getStrokePoints
+  const strokePoints = getStrokePoints(this.points as any, strokeOptions as any);
+
+    if (!strokePoints || strokePoints.length < 2) {
+      this.activeStroke.geometry.uvs = new Float32Array();
+      this.activeStroke.vertices = new Float32Array();
+      this.activeStroke.geometry.indices = new Uint32Array();
       return;
     }
 
-    this.activeStroke.clear();
-    this.activeStroke.setFillStyle(this.strokeSettings.strokeColor);
-    const [firstX, firstY] = outline[0];
-    this.activeStroke.moveTo(firstX, firstY);
-    for (let i = 1; i < outline.length; i++) {
-      const [x, y] = outline[i];
-      this.activeStroke.lineTo(x, y);
+    // 3. Construir la cinta de triángulos (Mesh)
+  const vertices: number[] = [];
+  const indices: number[] = [];
+  let index = 0;
+
+  const totalLen = (strokePoints[strokePoints.length - 1] as any)?.runningLength ?? 0;
+  // Smoothed pressure baseline similar to PF
+  let H = (strokePoints[0] as any)?.pressure ?? 0.5;
+
+    for (let i = 0; i < strokePoints.length; i++) {
+      const current = strokePoints[i] as any; // Usamos 'any' por simplicidad
+      const point = current.point as [number, number];
+      const tangent = current.vector as [number, number];
+      // normal from tangent
+      const nx = tangent[1];
+      const ny = -tangent[0];
+
+      // Compute effective half-width m like PF (size/thinning/pressure with optional velocity influence)
+      let m: number;
+      if (this.strokeSettings.thinning === 0) {
+        m = (this.strokeSettings.size ?? 1) * 0.5;
+      } else {
+        // pressure value
+        const rawP = typeof current.pressure === 'number' ? (current.pressure as number) : 0.5;
+        let p = rawP;
+        if (this.strokeSettings.simulatePressure) {
+          const u = this.strokeSettings.size || 1;
+          const v = Math.min(1, (current.distance as number) / u);
+          const Z = Math.min(1, 1 - v);
+          // smooth baseline H toward new pressure
+          H = (H + rawP) / 2;
+          p = Math.min(1, H + (Z - H) * (v * 0.275));
+        }
+        m = (this.strokeSettings.size ?? 1) * easingFn(0.5 - this.strokeSettings.thinning * (0.5 - p));
+      }
+      // Apply simple start/end taper factors
+      if (this.strokeSettings.taperStart) {
+        const t = Math.min(1, ((current.runningLength as number) ?? 0) / this.strokeSettings.taperStart);
+        m *= easingFn(t);
+      }
+      if (this.strokeSettings.taperEnd) {
+        const remain = Math.max(0, totalLen - ((current.runningLength as number) ?? 0));
+        const t = Math.min(1, remain / this.strokeSettings.taperEnd);
+        m *= easingFn(t);
+      }
+      m = Math.max(0.01, m);
+
+      // left/right vertices
+      vertices.push(point[0] - nx * m, point[1] - ny * m);
+      vertices.push(point[0] + nx * m, point[1] + ny * m);
+
+      // Añadir índices
+      if (i > 0) {
+        indices.push(index - 2, index - 1, index);
+        indices.push(index, index - 1, index + 1);
+      }
+
+      index += 2;
     }
-    this.activeStroke.closePath();
-    this.activeStroke.fill();
+
+    // 4. Actualizar el MeshSimple
+    const vertsArray = new Float32Array(vertices);
+    // Los UVs deben coincidir con los vértices, pero podemos dejarlos en 0
+    const uvsArray = new Float32Array(vertsArray.length);
+
+    this.activeStroke.geometry.uvs = uvsArray;
+    this.activeStroke.vertices = vertsArray;
+    this.activeStroke.geometry.indices = new Uint32Array(indices);
+
+    // 5. Aplicar color usando 'tint'
+    this.activeStroke.tint = this.strokeSettings.strokeColor;
   }
 
   private updateDebugPolyline(): void {

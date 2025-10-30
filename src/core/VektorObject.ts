@@ -1,14 +1,17 @@
-import { Container, Graphics } from 'pixi.js';
+import { Container } from 'pixi.js';
+import type { Graphics } from 'pixi.js';
+
+type VObjectGeom = Graphics | any;
 import type { StrokePoint } from '../types';
 
 export interface VektorObjectOptions {
   points: StrokePoint[];
-  geometry: Graphics;
+  geometry: VObjectGeom;
 }
 
 export class VektorObject extends Container {
   public points: StrokePoint[];
-  public vectorRepresentation: Graphics;
+  public vectorRepresentation: VObjectGeom;
 
   constructor(options: VektorObjectOptions) {
     super();
@@ -19,10 +22,15 @@ export class VektorObject extends Container {
     this.addChild(this.vectorRepresentation);
   }
 
-  public updateGeometry(newGeometry: Graphics): void {
+  public updateGeometry(newGeometry: VObjectGeom): void {
     // Remove old geometry if it exists
     if (this.vectorRepresentation.parent === this) {
       this.removeChild(this.vectorRepresentation);
+    }
+
+    // Destroy previous display object resources when replaced
+    if ('destroy' in this.vectorRepresentation && typeof (this.vectorRepresentation as any).destroy === 'function') {
+      (this.vectorRepresentation as any).destroy();
     }
 
     this.vectorRepresentation = newGeometry;

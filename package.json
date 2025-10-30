@@ -19,6 +19,7 @@
     "lil-gui": "^0.21.0",
     "perfect-freehand": "^1.2.2",
     "pixi.js": "^8.14.0",
-    "polygon-clipping": "^0.15.7"
+    "polygon-clipping": "^0.15.7",
+    "tess2": "^1.0.0"
   }
 }
