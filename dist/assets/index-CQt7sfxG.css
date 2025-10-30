@@ -1,0 +1,1 @@
+*,*:before,*:after{box-sizing:border-box}html,body{height:100%;margin:0;padding:0;background:#1a1a1a;color:#e6e6e6;-webkit-font-smoothing:antialiased;-moz-osx-font-smoothing:grayscale}canvas,#app>canvas,body>canvas{display:block;width:100vw;height:100vh}#app{position:fixed;top:0;right:0;bottom:0;left:0}
