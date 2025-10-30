@@ -1,88 +1,158 @@
-Visión General de Vektor
-Vektor será una aplicación web de dibujo vectorial minimalista y de alto rendimiento, optimizada para la entrada con stylus. Inspirada en la fluidez de apps como Concepts, Vektor se centrará en ofrecer una experiencia de dibujo natural sobre un lienzo infinito, combinando la sensación orgánica del dibujo libre con la precisión y escalabilidad del formato vectorial. Su interfaz será limpia y responsiva, priorizando el espacio de trabajo y garantizando un rendimiento excepcional incluso en dispositivos de gama media.
+Vektor es una aplicación web de dibujo híbrida (vectorial y raster) de alto rendimiento, diseñada para la entrada de stylus. Su arquitectura se basa en cuatro pipelines de renderizado distintos que se activan según la herramienta y el modo seleccionado.
 
-✨ Funcionalidades Clave Prioritarias
-Motor de Trazos Vectoriales Eficiente:
+Vectores Fluidos (Pluma): Captura de stylus de alta fidelidad (getCoalescedEvents()) procesada por perfect-freehand y renderizada como un polígono relleno (PIXI.Graphics.fill()) para un ancho variable.
 
-Captura de entrada de alta frecuencia (getCoalescedEvents).
+Vectores Fluidos (Lápiz): Usa la línea central de perfect-freehand para renderizar un trazo (PIXI.Graphics.stroke()), permitiendo estilos de línea (punteado, segmentado) con ancho uniforme.
 
-Procesamiento de puntos con una librería tipo perfect-freehand para generar polígonos de trazo suaves y con grosor variable.
+Vectores de Precisión: Herramientas (Línea, Círculo, Bézier) que generan geometría predecible y se renderizan como un trazo (PIXI.Graphics.stroke()).
 
-Renderizado acelerado por GPU usando rellenos (fill) en PIXI.Graphics, evitando los stroke() nativos para mayor velocidad y calidad.
+Boceto Raster (Pincel): Un pipeline de "estampado de pincel" de latencia cero que dibuja directamente sobre una capa PIXI.RenderTexture (un búfer de píxeles), sin usar perfect-freehand, para una experiencia de boceto raster inmediata.
 
+El núcleo de la gestión de escena es el VektorObject, un contenedor híbrido que gestiona sus propias representaciones vectoriales y raster. Un LayerManager global organiza estos objetos en Capas Vectoriales y Capas Raster separadas, permitiendo al usuario alternar entre un flujo de trabajo 100% vectorial y un flujo de trabajo de boceto raster ultrarrápido.
 
-Gestión Avanzada de Objetos:
+Un ToolManager modular y un SnapManager que modifica la entrada en tiempo real gestionan la lógica de dibujo. El SnapManager intercepta las coordenadas del puntero (incluyendo las de getCoalescedEvents()) y las "magnetiza" a las guías activas (rejillas, reglas, guías de perspectiva, o incluso otros trazos vectoriales) antes de pasarlas a la herramienta activa. Esto permite que tanto las herramientas vectoriales de precisión como las herramientas de boceto raster se restrinjan a las guías.
 
-Agrupación: Selección múltiple de objetos (trazos, otros grupos) para crear grupos simples que pueden ser transformados como una unidad.
+La persistencia se logra con un formato .vektor (JSON) interno y se exporta a estándares como PNG/JPG y formatos híbridos SVG/PDF que incrustan las capas raster como imágenes junto a los datos vectoriales.
 
-Componentes (Instancias): Una forma especial de grupo donde las copias (instancias) permanecen vinculadas al original (componente maestro). Editar el maestro actualiza todas las instancias.
+1. Misión y Filosofía Central
+El objetivo de Vektor es crear una herramienta de dibujo para la web que se sienta tan fluida e inmediata como una aplicación raster (ej. Procreate) pero que ofrezca el 100% de la editabilidad de una aplicación vectorial (ej. Figma).
 
-Edición Contextual: Posibilidad de "entrar" en un grupo o componente para añadir/editar trazos dentro de ese contexto aislado.
+La filosofía de diseño es "El Lienzo es el Protagonista", lo que exige una UI minimalista y un rendimiento extremo, incluso en dispositivos de gama media.
 
-Herramienta de Transformación Universal: Una única herramienta intuitiva para mover, rotar y escalar selecciones de cualquier tipo (trazos individuales, grupos, componentes).
+2. 🏛️ Arquitectura del Núcleo de Renderizado y Dibujo
+El sistema más complejo de Vektor es el pipeline de dibujo. Está desacoplado en tres etapas (Captura, Lógica, Renderizado) y utiliza cuatro pipelines de renderizado distintos según la herramienta y el estilo activos.
 
-Sistema de Capas Robusto:
+Etapa 1: Captura de Alta Fidelidad (Eventos Nativos)
+Para lograr una fidelidad de trazo superior, no utilizamos el sistema de eventos de PixiJS para el dibujo.
 
-Panel de capas visual.
+Listener Nativo: Vinculamos un listener pointermove nativo directamente al <canvas> de PixiJS.
 
-Funciones esenciales: Crear, eliminar, reordenar (arrastrar y soltar), fusionar (merge down), bloquear, ocultar/mostrar y ajustar la opacidad de capas completas.
+Eventos Fusionados: Dentro del listener, usamos event.getCoalescedEvents(). Esto es crucial, ya que nos da un array de todos los puntos de datos del stylus (120Hz-240Hz) que ocurrieron entre fotogramas (60Hz), asegurando que no se pierda ninguna información de la curva.
 
-Asistentes de Dibujo (Drawing Aids):
+Etapa 2 y 3: Lógica de Geometría y Renderizado (PixiJS)
+Los puntos de alta fidelidad de la Etapa 1 se procesan de manera diferente según la herramienta y el estilo activos.
 
-Rejilla (Grid): Visualización de rejillas personalizables (cartesiana, isométrica).
+Pipeline 1: Vectorial Fluido (Pluma) - Relleno de Polígono
+Para qué: El trazo de "tinta" principal de Vektor.
 
-Ajuste (Snap): Funcionalidad para que las herramientas y transformaciones se alineen magnéticamente a la rejilla, puntos clave de los objetos (vértices, centros) u otros elementos guía.
+Herramienta: Mano Alzada + Estilo: Relleno Sólido / Hatch.
 
-Librería Online:
+Pipeline: Eventos Coalesced (120Hz+) -> perfect-freehand -> Polígono -> PIXI.Graphics.fill().
 
-Un espacio en la nube para guardar y cargar proyectos completos.
+Capa Destino: Capa Vectorial.
 
-Posibilidad de guardar y reutilizar grupos y componentes como assets entre diferentes proyectos.
+Notas: Produce trazos orgánicos de ancho variable. Los rellenos Hatch se logran usando fill({ texture: hatchTexture, ... }).
 
-Interfaz Minimalista y Responsiva:
+Pipeline 2: Vectorial Fluido (Lápiz) - Trazo de Línea Central
+Para qué: Trazo a mano alzada con estilos de línea (punteado, etc.).
 
-Diseño centrado en el lienzo, con paneles que se puedan ocultar o minimizar.
+Herramienta: Mano Alzada + Estilo: Punteado / Segmentado.
 
-Buena experiencia tanto en escritorio como en tablets, priorizando la entrada con stylus.
+Pipeline: Eventos Coalesced -> perfect-freehand (solo línea central) -> PIXI.Graphics.path() -> PIXI.Graphics.stroke().
 
-Rendimiento fluido de la UI, evitando efectos visuales costosos.
+Capa Destino: Capa Vectorial.
 
-🏗️ Arquitectura Propuesta
+Notas: El ancho es uniforme. Los estilos de línea (punteado, segmentado) se renderizan pasando una textura 1D al método stroke({ texture: ... }).
 
-Motor de Renderizado: Pixi.js utilizando el backend WebGL  para máximo rendimiento gráfico acelerado por GPU.
+Pipeline 3: Vectorial de Precisión - Trazo de Puntos de Control
+Para qué: Líneas rectas, círculos, arcos, Béziers.
 
+Herramienta: Línea, Círculo, Polilínea, Bézier.
 
-Pipeline de Dibujo:
+Pipeline: Puntos de Control (ej. pointerdown, pointerup) -> PIXI.Graphics.path() -> PIXI.Graphics.stroke().
 
-Captura: Listeners de pointermove de alta frecuencia.
+Capa Destino: Capa Vectorial.
 
-Geometría: Procesamiento de puntos crudos con perfect-freehand (o similar) en cada frame de dibujo activo.
+Notas: También soporta estilos de stroke basados en textura (punteado, segmentado).
 
+Pipeline 4: Boceto Raster - Estampado de Pincel
+Para qué: Bocetaje rápido, sombreado, notas. La experiencia de "Photoshop" de latencia cero.
 
-Renderizado: Teselación del polígono resultante y dibujado mediante PIXI.Graphics.fill().
+Herramienta: Pincel Raster (o Mano Alzada en "Modo Raster").
 
+Pipeline:
 
-Estructura de Escena (Scene Graph):
+El usuario dibuja en una Capa Raster. Esta capa es un PIXI.RenderTexture (un búfer de píxeles del tamaño del lienzo).
 
-Una jerarquía gestionada internamente (o usando PIXI.Container ) que represente Capas, Grupos, Componentes (con referencias maestro-instancia) y Trazos (definidos por sus puntos de control simplificados y su polígono renderizable).
+Capturamos Eventos Coalesced (120Hz+) para obtener la máxima suavidad de la ruta.
 
+Para cada punto (e interpolando entre ellos), "estampamos" una textura de pincel (PIXI.Sprite) directamente sobre el PIXI.RenderTexture usando renderer.render(brushSprite, { renderTexture: ..., clear: false }).
 
-Gestión de Estado: Una solución robusta (podría ser Redux, Zustand, XState o una implementación a medida) para manejar:
+No se usa perfect-freehand.
 
-El estado completo de la escena (objetos, capas, propiedades).
+Capa Destino: Capa Raster.
 
-El historial de acciones para Deshacer/Rehacer.
+Notas: Es el método de dibujo más rápido posible ("blitting" de texturas). Es un dibujo destructivo dentro de su capa.
 
-El estado de la UI (herramienta seleccionada, paneles visibles, etc.).
+3. El Objeto de Vektor: Un Contenedor Híbrido
+El modelo de datos central de Vektor es el VektorObject (o VektorStroke). Este objeto es un PIXI.Container especial que gestiona sus diferentes representaciones y datos crudos:
 
-Interfaz de Usuario (UI):
+vectorRepresentation: Un objeto PIXI.Graphics (usado en Capas Vectoriales).
 
-Construida con un framework moderno (React, Vue, Svelte, etc.) para componentes modulares y reutilizables.
+rasterRepresentation: Un objeto PIXI.Sprite (usado en Capas Raster, su textura es el RenderTexture de la capa).
 
-Diseño minimalista, posiblemente con ayuda de utilidades CSS como TailwindCSS para mantener la consistencia y la limpieza.
+highFidelityPoints: Los puntos crudos de getCoalescedEvents() (usados para regenerar el trazo).
 
-Backend (Para Librería Online):
+controlPoints: Una versión simplificada (Bézier) de la línea central (usada para la edición de nodos).
 
-Un servidor (Node.js, Python, Go, etc.) y una base de datos (PostgreSQL, MongoDB, Firebase, etc.) para gestionar usuarios, proyectos y assets compartidos.
+4. Gestión de Capas Híbridas
+Nuestra UI de capas no es una simple lista. Refleja la dualidad de la aplicación:
 
-Esta estructura prioriza la modularidad, el rendimiento del dibujo y las capacidades de organización de objetos que mencionaste como primordiales.
+Capas Raster: Son, en esencia, PIXI.RenderTexture. El Pipeline 4 dibuja directamente en la textura de la capa activa. Permiten un flujo de trabajo de boceto rápido y destructivo.
+
+Capas Vectoriales: Son PIXI.Container estándar que contienen las vectorRepresentation de los VektorObjects. El dibujo aquí es no destructivo y basado en objetos.
+
+El usuario puede tener una "Capa de Boceto" (Raster) debajo de una "Capa de Entintado" (Vectorial), permitiendo un flujo de trabajo profesional.
+
+5. Sistema de Herramientas, Estado y Asistentes
+La lógica de la aplicación está gestionada por un sistema de estado centralizado y modificadores de entrada.
+
+DrawingContext (Estado Global): Un objeto de estado simple que la UI modifica. Define la intención del usuario. (ej. { toolType: 'line', strokeAppearance: 'dotted', color: 0xFF0000, ... }).
+
+ToolManager (Máquina de Estados): Mantiene la herramientaActiva (ej. LineTool, FreehandTool, RasterBrushTool). El ToolManager lee el DrawingContext y los eventos de entrada, y decide qué pipeline activar.
+
+GuideManager (Capa Visual): Dibuja las guías (rejillas, reglas, guías de perspectiva) en una capa PIXI.Container separada (guideLayer). Solo se actualiza en zoom/pan.
+
+SnapManager (Modificador de Entrada): Este es un sistema crítico. Se sitúa entre la captura de eventos y el ToolManager.
+
+Flujo de Snap (El Núcleo de la Asistencia):
+
+pointermove nativo se dispara (con getCoalescedEvents()).
+
+El SnapManager toma cada uno de los puntos de alta frecuencia.
+
+Comprueba si el "snap" está activo (a la rejilla, a las guías de perspectiva, o a los trazos vectoriales de otra capa).
+
+Si se encuentra un punto de ajuste cercano, modifica la coordenada de ese punto.
+
+Pasa el array de puntos ya modificados al ToolManager.
+
+El ToolManager pasa estos puntos alineados a la herramienta activa (ya sea el Pipeline 1, 2, 3 o 4).
+
+Esta arquitectura permite que incluso el boceto raster (Pipeline 4) se restrinja a guías, permitiendo al usuario dibujar una línea recta con textura de pincel simplemente siguiendo una regla.
+
+6. Gestión de Escena y Componentes
+Grupos: Contenedores simples (PIXI.Container) para agrupar VektorObjects dentro de una misma capa.
+
+Componentes (Maestros e Instancias): La característica de reusabilidad más potente. Un Componente Maestro es un VektorObject (o grupo) guardado en una librería. Una Instancia es un clon que referencia al Maestro. Editar el Maestro actualiza el contenido de todas las Instancias en tiempo real.
+
+7. Estrategia de Persistencia y Exportación
+Vektor distingue claramente entre guardar el trabajo (fidelidad total) y exportar (interoperabilidad).
+
+Guardado (.vektor):
+
+Un archivo .json que es un volcado directo del estado de la aplicación.
+
+Guarda todo: datos de trazo (vectoriales), la estructura de capas (incluyendo referencias a los RenderTexture de las Capas Raster, que se guardarían como PNGs dentro del JSON o en una carpeta) y las configuraciones de guías y componentes.
+
+Exportación Raster (PNG / JPG):
+
+Implementación: Fácil. Usamos la API de PixiJS renderer.extract.image(app.stage).
+
+Exportación Híbrida (SVG / PDF):
+
+Desafío: ¿Qué hacemos con las Capas Raster (Pipeline 4)?
+
+Solución: Las capas raster se exportan como imágenes PNG incrustadas (<image>) dentro del archivo SVG/PDF, preservando su posición.
+
+Las capas vectoriales se exportan como caminos (<path>, <circle>, etc.), ofreciendo al usuario la opción de "Preservar Apariencia" (exportar el polígono relleno de perfect-freehand) u "Optimizar para Edición" (exportar la línea central simplificada).
