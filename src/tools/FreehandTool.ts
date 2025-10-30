@@ -243,6 +243,9 @@ export class FreehandTool extends EventEmitter implements ITool {
   const totalLen = (strokePoints[strokePoints.length - 1] as any)?.runningLength ?? 0;
   // Smoothed pressure baseline similar to PF
   let H = (strokePoints[0] as any)?.pressure ?? 0.5;
+  // store per-point values for caps
+  const widths: number[] = [];
+  const tangents: Array<[number, number]> = [];
 
     for (let i = 0; i < strokePoints.length; i++) {
       const current = strokePoints[i] as any; // Usamos 'any' por simplicidad
@@ -253,23 +256,15 @@ export class FreehandTool extends EventEmitter implements ITool {
       const ny = -tangent[0];
 
       // Compute effective half-width m like PF (size/thinning/pressure with optional velocity influence)
-      let m: number;
-      if (this.strokeSettings.thinning === 0) {
-        m = (this.strokeSettings.size ?? 1) * 0.5;
-      } else {
-        // pressure value
-        const rawP = typeof current.pressure === 'number' ? (current.pressure as number) : 0.5;
-        let p = rawP;
-        if (this.strokeSettings.simulatePressure) {
-          const u = this.strokeSettings.size || 1;
-          const v = Math.min(1, (current.distance as number) / u);
-          const Z = Math.min(1, 1 - v);
-          // smooth baseline H toward new pressure
-          H = (H + rawP) / 2;
-          p = Math.min(1, H + (Z - H) * (v * 0.275));
-        }
-        m = (this.strokeSettings.size ?? 1) * easingFn(0.5 - this.strokeSettings.thinning * (0.5 - p));
-      }
+      // Effective pressure p: device pressure blended with velocity-based proxy so Thinning always has visible effect
+      const rawP = typeof current.pressure === 'number' ? (current.pressure as number) : 0.5;
+      const sizeNorm = Math.max(1, this.strokeSettings.size || 1);
+      const v = Math.min(1, (current.distance as number) / sizeNorm); // 0 slow, 1 fast
+      const velP = 1 - v; // slow -> 1 (thick), fast -> 0 (thin)
+      // If simulatePressure is off, still use velocity so thinning always has visible effect
+      const p = this.strokeSettings.simulatePressure ? (0.5 * rawP + 0.5 * velP) : velP;
+      // Compute half-width from thinning curve (matches PF form when simulatePressure drives p)
+      let m: number = (this.strokeSettings.size ?? 1) * easingFn(0.5 - this.strokeSettings.thinning * (0.5 - p));
       // Apply simple start/end taper factors
       if (this.strokeSettings.taperStart) {
         const t = Math.min(1, ((current.runningLength as number) ?? 0) / this.strokeSettings.taperStart);
@@ -280,9 +275,15 @@ export class FreehandTool extends EventEmitter implements ITool {
         const t = Math.min(1, remain / this.strokeSettings.taperEnd);
         m *= easingFn(t);
       }
-      m = Math.max(0.01, m);
+  m = Math.max(0.01, m);
+  // Hard minimum: never thinner than size/2
+  m = Math.max((this.strokeSettings.size ?? 1) * 0.5, m);
 
-      // left/right vertices
+  // remember tangent and width
+  tangents[i] = [tangent[0], tangent[1]];
+  widths[i] = m;
+
+  // left/right vertices
       vertices.push(point[0] - nx * m, point[1] - ny * m);
       vertices.push(point[0] + nx * m, point[1] + ny * m);
 
@@ -295,7 +296,59 @@ export class FreehandTool extends EventEmitter implements ITool {
       index += 2;
     }
 
-    // 4. Actualizar el MeshSimple
+    // 4. Añadir round caps si están activados
+    const addRoundCap = (atStart: boolean) => {
+      const i = atStart ? 0 : (strokePoints.length - 1);
+      const point = (strokePoints[i] as any).point as [number, number];
+      const t = tangents[i];
+      const r = Math.max(0.01, widths[i] || (this.strokeSettings.size ?? 1) * 0.5);
+      const midAngle = Math.atan2(atStart ? -t[1] : t[1], atStart ? -t[0] : t[0]);
+      const startAngle = midAngle - Math.PI * 0.5;
+      const endAngle = midAngle + Math.PI * 0.5;
+      const steps = 14;
+
+      const leftIdx = i * 2;
+      const rightIdx = i * 2 + 1;
+      const arcIndices: number[] = [];
+
+      // choose direction: start cap from left->right, end cap from right->left
+      if (atStart) {
+        arcIndices.push(leftIdx);
+      } else {
+        arcIndices.push(rightIdx);
+      }
+
+      // intermediate arc points
+      for (let s = 1; s < steps; s++) {
+        const a = startAngle + (s / steps) * (endAngle - startAngle);
+        const ax = point[0] + Math.cos(a) * r;
+        const ay = point[1] + Math.sin(a) * r;
+        vertices.push(ax, ay);
+        arcIndices.push(index + (atStart ? 0 : 0));
+        // newly added vertex index is current vertex count/2 - 1
+        arcIndices[arcIndices.length - 1] = (vertices.length / 2) - 1;
+      }
+
+      if (atStart) {
+        arcIndices.push(rightIdx);
+      } else {
+        arcIndices.push(leftIdx);
+      }
+
+      // center vertex
+      const centerIndex = vertices.length / 2;
+      vertices.push(point[0], point[1]);
+
+      // triangles fan
+      for (let k = 0; k < arcIndices.length - 1; k++) {
+        indices.push(centerIndex, arcIndices[k], arcIndices[k + 1]);
+      }
+    };
+
+    if (this.strokeSettings.capStart) addRoundCap(true);
+    if (this.strokeSettings.capEnd) addRoundCap(false);
+
+    // 5. Actualizar el MeshSimple
     const vertsArray = new Float32Array(vertices);
     // Los UVs deben coincidir con los vértices, pero podemos dejarlos en 0
     const uvsArray = new Float32Array(vertsArray.length);
@@ -304,7 +357,7 @@ export class FreehandTool extends EventEmitter implements ITool {
     this.activeStroke.vertices = vertsArray;
     this.activeStroke.geometry.indices = new Uint32Array(indices);
 
-    // 5. Aplicar color usando 'tint'
+    // 6. Aplicar color usando 'tint'
     this.activeStroke.tint = this.strokeSettings.strokeColor;
   }
 
