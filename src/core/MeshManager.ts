@@ -10,6 +10,7 @@ export class MeshManager {
     private posBuffer!: Float32Array;
     private colorBuffer!: Float32Array;
     private indexBuffer!: Uint16Array;
+    private sideBuffer!: Float32Array; // -1 for left, +1 for right (used for feathering in shader)
     private segmentCapacity = 0;
     private vertCount = 0;
     private colorCount = 0;
@@ -21,6 +22,11 @@ export class MeshManager {
     // 1. Crear el Shader usando el constructor de alto nivel
     // que maneja los #includes automáticamente.
     this.shader = Shader.from({ gl: { vertex: vertexSrc, fragment: fragmentSrc, name: 'legacy-ink-shader' } });
+    // Valor por defecto para el feather de los bordes (0.8 = borde suave)
+    (this.shader as any).uniforms = {
+            ...(this.shader as any).uniforms,
+            uFeather: 0.85,
+        };
 
         // 2. Inicializar búferes y geometría
         this.init(1000); // Capacidad inicial de 1000 segmentos
@@ -39,15 +45,26 @@ export class MeshManager {
         return this.mesh;
     }
 
+    public setFeather(edge: number) {
+        const v = Math.max(0.0, Math.min(1.0, edge));
+        try {
+            (this.shader as any).uniforms.uFeather = v;
+        } catch {
+            // ignore
+        }
+    }
+
     private init(initialSegments: number) {
         this.segmentCapacity = Math.max(16, initialSegments | 0);
         const vertCapacity = this.segmentCapacity * 4;
-        const posCapacityFloats = vertCapacity * 2;
-        const colorCapacityFloats = vertCapacity * 4;
+    const posCapacityFloats = vertCapacity * 2;
+    const colorCapacityFloats = vertCapacity * 4;
+    const sideCapacityFloats = vertCapacity * 1;
         const indexCapacity = this.segmentCapacity * 6;
 
         this.posBuffer = new Float32Array(posCapacityFloats);
         this.colorBuffer = new Float32Array(colorCapacityFloats);
+    this.sideBuffer = new Float32Array(sideCapacityFloats);
         this.indexBuffer = new Uint16Array(indexCapacity);
         
         this.vertCount = 0;
@@ -58,6 +75,7 @@ export class MeshManager {
             // Usar cast a any porque las firmas de addAttribute en las defs de Pixi pueden diferir
             (geom as any).addAttribute('aPosition', this.posBuffer, 2);
             (geom as any).addAttribute('aColor', this.colorBuffer, 4);
+            (geom as any).addAttribute('aSide', this.sideBuffer, 1);
         geom.addIndex(this.indexBuffer);
         this.geometry = geom;
     }
@@ -72,24 +90,29 @@ export class MeshManager {
 
         const newVertCapacity = newCapacity * 4;
         const newPosFloats = newVertCapacity * 2;
-        const newColorFloats = newVertCapacity * 4;
+    const newColorFloats = newVertCapacity * 4;
+    const newSideFloats = newVertCapacity * 1;
         const newIndexCapacity = newCapacity * 6;
 
         const newPos = new Float32Array(newPosFloats);
         newPos.set(this.posBuffer.subarray(0, this.vertCount));
         const newCol = new Float32Array(newColorFloats);
         newCol.set(this.colorBuffer.subarray(0, this.colorCount));
+    const newSide = new Float32Array(newSideFloats);
+    newSide.set(this.sideBuffer.subarray(0, (this.vertCount / 2) | 0));
         const newIdx = new Uint16Array(newIndexCapacity);
         newIdx.set(this.indexBuffer.subarray(0, this.indexCount));
 
         this.segmentCapacity = newCapacity;
         this.posBuffer = newPos;
         this.colorBuffer = newCol;
-        this.indexBuffer = newIdx;
+    this.indexBuffer = newIdx;
+    this.sideBuffer = newSide;
 
             const newGeom = new Geometry();
             (newGeom as any).addAttribute('aPosition', this.posBuffer, 2);
             (newGeom as any).addAttribute('aColor', this.colorBuffer, 4);
+            (newGeom as any).addAttribute('aSide', this.sideBuffer, 1);
         newGeom.addIndex(this.indexBuffer);
         this.mesh.geometry = newGeom;
         this.geometry = newGeom;
@@ -129,6 +152,15 @@ export class MeshManager {
         }
         this.colorCount = c;
 
+        // Side attribute: -1 for left edge vertices (AL, BL), +1 for right (AR, BR)
+        const sb = this.sideBuffer;
+        let sIndex = (this.vertCount / 2 | 0) - 4; // base vertex index (in vertices, not floats)
+        // Write one float per vertex in the same order as positions
+        sb[sIndex + 0] = -1.0; // AL
+        sb[sIndex + 1] = +1.0; // AR
+        sb[sIndex + 2] = -1.0; // BL
+        sb[sIndex + 3] = +1.0; // BR
+
         let ii = this.indexCount;
         const ib = this.indexBuffer;
         ib[ii++] = baseVertex + 0; ib[ii++] = baseVertex + 1; ib[ii++] = baseVertex + 2;
@@ -139,8 +171,10 @@ export class MeshManager {
     const posUsed = this.posBuffer.subarray(0, this.vertCount);
     const colUsed = this.colorBuffer.subarray(0, this.colorCount);
     const idxUsed = this.indexBuffer.subarray(0, this.indexCount);
+    const sideUsed = this.sideBuffer.subarray(0, (this.vertCount / 2) | 0);
     (this.geometry as any).getAttribute('aPosition').buffer.update(posUsed);
     (this.geometry as any).getAttribute('aColor').buffer.update(colUsed);
+    (this.geometry as any).getAttribute('aSide').buffer.update(sideUsed);
     (this.geometry as any).getIndex().update(idxUsed);
     }
 
@@ -152,8 +186,10 @@ export class MeshManager {
     const posUsed = this.posBuffer.subarray(0, this.vertCount);
     const colUsed = this.colorBuffer.subarray(0, this.colorCount);
     const idxUsed = this.indexBuffer.subarray(0, this.indexCount);
+    const sideUsed = this.sideBuffer.subarray(0, (this.vertCount / 2) | 0);
     (this.geometry as any).getAttribute('aPosition').buffer.update(posUsed);
     (this.geometry as any).getAttribute('aColor').buffer.update(colUsed);
+    (this.geometry as any).getAttribute('aSide').buffer.update(sideUsed);
     (this.geometry as any).getIndex().update(idxUsed);
     }
 }
