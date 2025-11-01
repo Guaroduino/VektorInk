@@ -125,7 +125,7 @@ export class FreehandTool extends EventEmitter implements ITool {
       (window as any).__VEKTOR_WHITE_TEXTURE__ = Texture.from(c);
     }
 
-    this.activeStroke = new MeshSimple({ texture: (window as any).__VEKTOR_WHITE_TEXTURE__ });
+  this.activeStroke = new MeshSimple({ texture: (window as any).__VEKTOR_WHITE_TEXTURE__ });
     targetLayer.addChild(this.activeStroke);
 
     this.updateStrokeMesh(false);
@@ -229,9 +229,10 @@ export class FreehandTool extends EventEmitter implements ITool {
   const strokePoints = getStrokePoints(this.points as any, strokeOptions as any);
 
     if (!strokePoints || strokePoints.length < 2) {
-      this.activeStroke.geometry.uvs = new Float32Array();
+      // Reset using SimpleMesh high-level properties
       this.activeStroke.vertices = new Float32Array();
-      this.activeStroke.geometry.indices = new Uint32Array();
+      (this.activeStroke as any).indices = new Uint32Array();
+      (this.activeStroke as any).uvs = new Float32Array();
       return;
     }
 
@@ -340,14 +341,16 @@ export class FreehandTool extends EventEmitter implements ITool {
     if (this.strokeSettings.capStart) addRoundCap(true);
     if (this.strokeSettings.capEnd) addRoundCap(false);
 
-    // 5. Actualizar el MeshSimple
-    const vertsArray = new Float32Array(vertices);
-    // Los UVs deben coincidir con los vértices, pero podemos dejarlos en 0
-    const uvsArray = new Float32Array(vertsArray.length);
+  // 4. Actualizar el MeshSimple
+  const vertsArray = new Float32Array(vertices);
+  const uvsArray = new Float32Array(vertsArray.length); // Los UVs deben coincidir
+  const indicesArray = new Uint32Array(indices);
+    
+  // Asignar a las propiedades de alto nivel de SimpleMesh
+  this.activeStroke.vertices = vertsArray;
+  (this.activeStroke as any).indices = indicesArray;
+  (this.activeStroke as any).uvs = uvsArray;
 
-    this.activeStroke.geometry.uvs = uvsArray;
-    this.activeStroke.vertices = vertsArray;
-    this.activeStroke.geometry.indices = new Uint32Array(indices);
 
     // 6. Aplicar color usando 'tint'
     this.activeStroke.tint = this.strokeSettings.strokeColor;
