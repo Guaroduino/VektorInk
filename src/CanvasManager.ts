@@ -1,6 +1,7 @@
 import { Application, Container, Graphics } from 'pixi.js';
 import { GUI } from 'lil-gui';
 import { ToolManager } from './core/ToolManager';
+import { MeshManager } from './core/MeshManager';
 
 // Gestor del canvas con arquitectura de Mesh incremental
 export class CanvasManager {
@@ -9,8 +10,11 @@ export class CanvasManager {
   private inputLayer: Container;
   private previewLayer: Graphics;
   private toolManager: ToolManager;
-  private toolSettings = {
-    activeTool: 'freehand',
+  private meshManager!: MeshManager;
+  private inkLayer!: Container;
+  private uiState = {
+    activeTool: 'legacyInk', // La herramienta por defecto
+    clearInk: () => this.meshManager.clear(),
   };
 
   constructor(app: Application) {
@@ -36,6 +40,13 @@ export class CanvasManager {
   this.previewLayer.name = 'previewLayer';
   this.app.stage.addChild(this.previewLayer);
 
+  // Inicializar MeshManager y capa de tinta (ink layer)
+  this.meshManager = new MeshManager(this.app);
+  this.inkLayer = new Container();
+  (this.inkLayer as any).label = 'inkLayer';
+  this.inkLayer.addChild(this.meshManager.getMesh());
+  this.app.stage.addChild(this.inkLayer);
+
     // Config de eventos globales
     this.app.stage.eventMode = 'static';
     this.app.stage.hitArea = this.app.screen;
@@ -45,9 +56,9 @@ export class CanvasManager {
     const gui = new GUI();
 
     // Carpeta de Herramientas en la UI
-    const toolFolder = gui.addFolder('Tools');
-    toolFolder
-      .add(this.toolSettings, 'activeTool', ['freehand', 'line'])
+    const toolsFolder = gui.addFolder('Tools');
+    toolsFolder
+      .add(this.uiState, 'activeTool', ['freehand', 'line', 'legacyInk'])
       .name('Active Tool')
       .onChange((toolName: string) => {
         this.toolManager.setActiveTool(toolName);
@@ -55,19 +66,23 @@ export class CanvasManager {
 
     // Clear Canvas button
     const actions = { clear: () => this.toolManager.clearScene() };
-    toolFolder.add(actions, 'clear').name('Clear Canvas');
+    toolsFolder.add(actions, 'clear').name('Clear Canvas');
 
-    // 1. Inicializa el ToolManager, pasándole las dependencias
+    // Añadir el botón de limpiar la capa de tinta al mismo folder
+    toolsFolder.add(this.uiState, 'clearInk').name('Clear Ink Layer');
+
+    // 1. Inicializa el ToolManager, pasándole las dependencias (incluyendo meshManager)
     this.toolManager = new ToolManager(
       this.app,
-      gui
+      gui,
+      this.meshManager
     );
 
     // 2. Activa los listeners de entrada
     this.toolManager.listen();
 
-  // 3. Establece la herramienta por defecto
-  this.toolManager.setActiveTool(this.toolSettings.activeTool);
+  // 3. Establece la herramienta por defecto basada en el estado de la UI
+  this.toolManager.setActiveTool(this.uiState.activeTool);
 
     // 4. Conecta el bucle de previsualización al ticker de la app
     this.app.ticker.add(this.onTick, this);
