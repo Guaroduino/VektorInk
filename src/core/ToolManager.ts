@@ -1,6 +1,8 @@
 import type { ITool, VektorPointerEvent } from '../tools/ITool';
 import { FreehandTool } from '../tools/FreehandTool';
 import { LineTool } from '../tools/LineTool';
+import { LegacyInkTool } from '../tools/LegacyInkTool';
+import { MeshManager } from './MeshManager';
 import { VektorObject } from './VektorObject';
 import { Application, Container, Graphics, Point } from 'pixi.js';
 import { GUI } from 'lil-gui';
@@ -14,14 +16,16 @@ export class ToolManager {
   private inputTarget!: Container;
   private drawingTarget!: Container;
   private previewLayer!: Graphics;
+  private meshManager!: MeshManager;
   private scene: Container;
   private domElement: HTMLElement;
   private lastMappedPoint = new Point();
   private isPointerDown = false;
 
-  constructor(app: Application, gui: GUI) {
+  constructor(app: Application, gui: GUI, meshManager: MeshManager) {
     this.app = app;
     this.gui = gui;
+    this.meshManager = meshManager;
     this.domElement = (this.app.renderer as any).canvas as HTMLElement;
 
     // Resolver capas desde el stage por nombre (CanvasManager debe configurarlas antes)
@@ -59,6 +63,10 @@ export class ToolManager {
     lineTool.on('strokeComplete', (obj: VektorObject) => {
       this.scene.addChild(obj);
     });
+
+    // Registrar LegacyInkTool que dibuja directamente en la capa de MeshManager
+    const legacyInkTool = new LegacyInkTool(this.meshManager, this.gui);
+    this.tools.set('legacyInk', legacyInkTool);
   }
 
   public setActiveTool(name: string): void {
